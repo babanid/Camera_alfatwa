@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kamera Bukti Kas Keluar — Al-Fatwa Bandung</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; }
+    body { margin:0; background:#f1f5f9; color:#1f2937; }
+    main { max-width:900px; margin:20px auto; padding:16px; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:18px; padding:20px; box-shadow:0 8px 28px rgba(15,23,42,.08); }
+    h1 { margin:0 0 8px; font-size:22px; color:#1e3a8a; }
+    p { line-height:1.5; }
+    video { display:block; width:100%; max-height:65vh; background:#0f172a; border-radius:12px; object-fit:contain; }
+    canvas { display:none; }
+    .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:14px; }
+    button { border:0; border-radius:9px; padding:11px 15px; font-weight:700; cursor:pointer; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .primary { background:#2563eb; color:white; }
+    .secondary { background:#e2e8f0; color:#1f2937; }
+    #status { border:1px solid #bfdbfe; background:#eff6ff; color:#1e40af; padding:12px; border-radius:10px; }
+    .small { color:#64748b; font-size:13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>📷 Kamera Bukti Pembayaran</h1>
+      <p>Halaman kamera mandiri untuk transaksi Kas Keluar Al-Fatwa Bandung. Pastikan bukti pembayaran terlihat jelas dan tidak memuat data yang tidak diperlukan.</p>
+      <p id="status" role="status" aria-live="polite">Memeriksa koneksi kembali ke aplikasi…</p>
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="actions">
+        <button id="closeButton" class="secondary" type="button">Batal / Tutup</button>
+        <button id="startButton" class="primary" type="button">Aktifkan Kamera</button>
+        <button id="captureButton" class="primary" type="button" disabled>Ambil Foto & Kirim</button>
+      </div>
+      <p class="small">Halaman ini wajib diakses melalui HTTPS. Saat diminta browser, izinkan akses kamera. Di HP, kamera belakang akan dipilih jika tersedia.</p>
+    </section>
+  </main>
+<script>
+(function() {
+  'use strict';
+  const params = new URLSearchParams(window.location.search);
+  const returnOrigin = params.get('returnOrigin') || '';
+  const nonce = params.get('nonce') || '';
+  const status = document.getElementById('status');
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const startButton = document.getElementById('startButton');
+  const captureButton = document.getElementById('captureButton');
+  const closeButton = document.getElementById('closeButton');
+  let stream = null;
+  let busy = false;
+
+  function setStatus(message, error) {
+    status.textContent = message;
+    status.style.background = error ? '#fef2f2' : '#eff6ff';
+    status.style.borderColor = error ? '#fecaca' : '#bfdbfe';
+    status.style.color = error ? '#991b1b' : '#1e40af';
+  }
+  function validReturnOrigin() {
+    try {
+      const u = new URL(returnOrigin);
+      return u.protocol === 'https:' && (u.hostname === 'script.google.com' || u.hostname.endsWith('.googleusercontent.com'));
+    } catch (e) { return false; }
+  }
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(function(track) { try { track.stop(); } catch (e) {} });
+    stream = null;
+    video.srcObject = null;
+    captureButton.disabled = true;
+  }
+  function sendToApp(payload) {
+    if (!window.opener || window.opener.closed) {
+      setStatus('Tab aplikasi tidak ditemukan. Jangan tutup tab ini; buka kamera kembali dari tombol Kas Keluar.', true);
+      return false;
+    }
+    if (!validReturnOrigin() || !nonce) {
+      setStatus('Alamat pengembalian tidak valid. Tutup halaman ini dan buka kamera dari aplikasi Al-Fatwa.', true);
+      return false;
+    }
+    window.opener.postMessage(Object.assign({nonce:nonce}, payload), returnOrigin);
+    return true;
+  }
+
+  startButton.addEventListener('click', async function() {
+    if (!validReturnOrigin() || !nonce || !window.opener) {
+      setStatus('Halaman ini harus dibuka melalui tombol Buka Kamera pada aplikasi Al-Fatwa.', true);
+      return;
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      setStatus('Browser tidak menyediakan kamera. Pastikan halaman HTTPS dan gunakan Chrome, Edge, atau browser terbaru.', true);
+      return;
+    }
+    stopCamera();
+    startButton.disabled = true;
+    setStatus('Meminta izin kamera… pilih Izinkan jika browser bertanya.');
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio:false,
+        video:{ facingMode:{ideal:'environment'}, width:{ideal:1600}, height:{ideal:1200} }
+      });
+      video.srcObject = stream;
+      await video.play();
+      captureButton.disabled = false;
+      setStatus('Kamera aktif. Arahkan ke bukti pembayaran, lalu tekan Ambil Foto & Kirim.');
+    } catch (error) {
+      startButton.disabled = false;
+      setStatus('Kamera gagal dibuka: ' + (error && error.message ? error.message : String(error)) + '. Periksa izin kamera browser/perangkat, atau gunakan Upload foto dari perangkat di aplikasi.', true);
+    }
+  });
+
+  captureButton.addEventListener('click', function() {
+    if (busy || !stream || !video.videoWidth || !video.videoHeight) {
+      setStatus('Kamera belum siap. Tunggu hingga pratinjau muncul.', true);
+      return;
+    }
+    busy = true;
+    captureButton.disabled = true;
+    setStatus('Memproses foto…');
+    const maxWidth = 1600;
+    const scale = Math.min(1, maxWidth / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      busy = false;
+      captureButton.disabled = false;
+      setStatus('Tidak dapat menyiapkan gambar. Coba kembali.', true);
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function(blob) {
+      if (!blob) {
+        busy = false;
+        captureButton.disabled = false;
+        setStatus('Foto tidak berhasil dibuat. Coba lagi.', true);
+        return;
+      }
+      if (blob.size > 8 * 1024 * 1024) {
+        busy = false;
+        captureButton.disabled = false;
+        setStatus('Foto lebih dari 8 MB. Dekatkan kamera ke bukti agar gambar bisa dikompresi.', true);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = function() {
+        busy = false;
+        captureButton.disabled = false;
+        setStatus('Browser gagal membaca foto. Coba lagi.', true);
+      };
+      reader.onload = function() {
+        const dataUrl = String(reader.result || '');
+        const fileName = 'bukti-kas-keluar-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg';
+        const sent = sendToApp({type:'ALFATWA_KAS_KELUAR_CAMERA_RESULT', dataUrl:dataUrl, fileName:fileName, mimeType:'image/jpeg'});
+        if (sent) {
+          stopCamera();
+          setStatus('Foto dikirim ke aplikasi. Kembali ke tab Al-Fatwa; foto akan diunggah saat transaksi disimpan.');
+          startButton.disabled = true;
+          setTimeout(function() { try { window.close(); } catch (e) {} }, 1100);
+        } else {
+          busy = false;
+          captureButton.disabled = false;
+        }
+      };
+      reader.readAsDataURL(blob);
+    }, 'image/jpeg', 0.82);
+  });
+
+  closeButton.addEventListener('click', function() {
+    sendToApp({type:'ALFATWA_KAS_KELUAR_CAMERA_CANCEL'});
+    stopCamera();
+    try { window.close(); } catch (e) {}
+    setStatus('Tab kamera boleh ditutup; tidak ada foto yang dikirim.');
+  });
+
+  if (!validReturnOrigin() || !nonce || !window.opener) {
+    setStatus('Buka halaman ini menggunakan tombol Buka Kamera di aplikasi Al-Fatwa. URL kamera tidak boleh dibuka sendirian.', true);
+    startButton.disabled = true;
+    captureButton.disabled = true;
+  } else {
+    setStatus('Siap. Tekan Aktifkan Kamera untuk meminta izin kamera.');
+  }
+  window.addEventListener('pagehide', stopCamera);
+})();
+</script>
+</body>
+</html>
